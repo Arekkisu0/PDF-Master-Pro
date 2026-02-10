@@ -40,6 +40,9 @@ def limpar_texto_para_pdf(texto):
 def alternar_tema():
     mode = "light" if switch_tema.get() == 1 else "dark"
     ctk.set_appearance_mode(mode)
+    # Força a atualização da cor de fundo da janela raiz para evitar o fundo branco
+    bg_color = ctk.ThemeManager.theme["CTk"]["fg_color"]
+    janela.configure(bg=bg_color[1] if mode == "dark" else bg_color[0])
 
 def obter_caminho_drop(event):
     path = event.data.strip('{}')
@@ -133,41 +136,51 @@ def iniciar_processamento():
 # --- INTERFACE ---
 janela = TkinterDnD.Tk()
 ctk.set_appearance_mode("dark")
-janela.title("PDF Master Pro v4.7 - AI Translator")
+janela.title("PDF Master Pro v4.8 - AI Translator")
 janela.geometry("550x950")
+
+# Força a cor de fundo da janela principal (ROOT)
+bg_color = ctk.ThemeManager.theme["CTk"]["fg_color"]
+janela.configure(bg=bg_color[1]) 
 
 frame_top = ctk.CTkFrame(janela, fg_color="transparent")
 frame_top.pack(pady=10, padx=20, fill="x")
+
 switch_ia = ctk.CTkSwitch(frame_top, text="Ativar IA (Llama 3)", progress_color="#A29BFE")
 switch_ia.pack(side="left")
+
 switch_tema = ctk.CTkSwitch(frame_top, text="Modo Claro", command=alternar_tema)
 switch_tema.pack(side="right")
 
-ctk.CTkLabel(janela, text="EDITOR DE LIVROS PDF", font=("Roboto", 24, "bold")).pack(pady=10)
+lbl_titulo = ctk.CTkLabel(janela, text="EDITOR DE LIVROS PDF", font=("Roboto", 24, "bold"))
+lbl_titulo.pack(pady=10)
 
 frame_drop = ctk.CTkFrame(janela, border_width=2, border_color="#3B8ED0")
 frame_drop.pack(pady=10, padx=40, fill="x")
 frame_drop.drop_target_register(DND_FILES)
 frame_drop.dnd_bind('<<Drop>>', obter_caminho_drop)
+
 ctk.CTkLabel(frame_drop, text="\nARRASTE O .TXT AQUI\n", font=("Roboto", 14, "bold")).pack(pady=20)
 
-entry_caminho = ctk.CTkEntry(janela, width=400, state="readonly")
+entry_caminho = ctk.CTkEntry(janela, width=400, state="readonly", placeholder_text="Aguardando arquivo...")
 entry_caminho.pack(pady=5)
 
+# Frame de configurações com cor adaptável
 frame_cfg = ctk.CTkFrame(janela)
 frame_cfg.pack(pady=10, padx=40, fill="both", expand=True)
 
-# Campos
-ctk.CTkLabel(frame_cfg, text="Nome do Arquivo:").pack(pady=(10,0))
-entry_nome_arquivo = ctk.CTkEntry(frame_cfg, width=350)
+# Campos de entrada
+ctk.CTkLabel(frame_cfg, text="Nome do Arquivo:", font=("Roboto", 12, "bold")).pack(pady=(10,0))
+entry_nome_arquivo = ctk.CTkEntry(frame_cfg, width=350, placeholder_text="Ex: meu_livro_final")
 entry_nome_arquivo.pack()
 
-ctk.CTkLabel(frame_cfg, text="Título Cabeçalho:").pack(pady=(5,0))
-entry_topo = ctk.CTkEntry(frame_cfg, width=350)
+ctk.CTkLabel(frame_cfg, text="Título Cabeçalho:", font=("Roboto", 12, "bold")).pack(pady=(5,0))
+entry_topo = ctk.CTkEntry(frame_cfg, width=350, placeholder_text="Ex: Transcrição de Aula")
 entry_topo.pack()
 
-ctk.CTkLabel(frame_cfg, text="Fonte:").pack(pady=(5,0))
+ctk.CTkLabel(frame_cfg, text="Fonte:", font=("Roboto", 12, "bold")).pack(pady=(5,0))
 combo_fonte = ctk.CTkComboBox(frame_cfg, values=["helvetica", "Arial", "Times"], width=350)
+combo_fonte.set("helvetica")
 combo_fonte.pack()
 
 ctk.CTkLabel(frame_cfg, text="Tarefa da IA:", font=("Roboto", 12, "bold")).pack(pady=(10, 0))
@@ -177,10 +190,13 @@ combo_ia.pack()
 
 progress_bar = ctk.CTkProgressBar(janela, width=400)
 progress_bar.set(0)
-progress_bar.pack(pady=20)
+progress_bar.pack(pady=25)
 
-ctk.CTkButton(janela, text="GERAR ARQUIVOS", command=iniciar_processamento, height=50, fg_color="#2ECC71").pack(pady=10)
-label_status = ctk.CTkLabel(janela, text="Pronto para começar")
-label_status.pack()
+btn_gerar = ctk.CTkButton(janela, text="GERAR ARQUIVOS", command=iniciar_processamento, 
+                          height=50, font=("Roboto", 16, "bold"), fg_color="#2ECC71", hover_color="#27AE60")
+btn_gerar.pack(pady=10)
+
+label_status = ctk.CTkLabel(janela, text="Pronto para começar", font=("Roboto", 12, "italic"))
+label_status.pack(pady=10)
 
 janela.mainloop()
