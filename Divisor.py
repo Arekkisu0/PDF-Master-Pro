@@ -40,7 +40,6 @@ def limpar_texto_para_pdf(texto):
 def alternar_tema():
     mode = "light" if switch_tema.get() == 1 else "dark"
     ctk.set_appearance_mode(mode)
-    # Força a atualização da cor de fundo da janela raiz para evitar o fundo branco
     bg_color = ctk.ThemeManager.theme["CTk"]["fg_color"]
     janela.configure(bg=bg_color[1] if mode == "dark" else bg_color[0])
 
@@ -67,13 +66,14 @@ def iniciar_processamento():
     if not pasta_destino: return
 
     try:
-        label_status.configure(text="Status: Lendo...", text_color="#3B8ED0")
+        label_status.configure(text="Status: Processando...", text_color="#3B8ED0")
         janela.update()
 
         with open(caminho_txt, "r", encoding="utf-8") as f:
             texto_bruto = f.read()
 
-        TAMANHO_MAXIMO = 5000 
+        # Ajuste de tamanho para não cortar frases no meio
+        TAMANHO_MAXIMO = 4500 
         inicio, partes = 0, []
         while inicio < len(texto_bruto):
             fim = min(inicio + TAMANHO_MAXIMO, len(texto_bruto))
@@ -96,20 +96,23 @@ def iniciar_processamento():
                 label_status.configure(text=f"IA: {modo_ia} ({i+1}/{total})", text_color="#A29BFE")
                 janela.update()
                 
-                prompt_task = "Corrija apenas pontuação e erros gramaticais."
-                if modo_ia == "Inglês -> Português":
-                    prompt_task = "Traduza para Português do Brasil e corrija a pontuação."
+                # --- NOVO PROMPT REFINADO v5.0 ---
+                if modo_ia == "Apenas Corrigir":
+                    instrucao = "Atue como revisor gramatical experiente. Corrija pontuação e ortografia. Mantenha 100% do significado original."
+                elif modo_ia == "Inglês -> Português":
+                    instrucao = "Atue como tradutor profissional. Traduza do Inglês para Português do Brasil de forma fluida e natural. Não resuma."
                 elif modo_ia == "Português -> Inglês":
-                    prompt_task = "Translate to English and correct punctuation."
+                    instrucao = "Act as a professional translator. Translate from Portuguese to English. Keep the tone formal and accurate. Do not summarize."
 
                 response = ollama.chat(model='llama3', messages=[
-                    {'role': 'system', 'content': f"Você é um motor de texto. {prompt_task} Retorne APENAS o texto resultante. Proibido introduções ou comentários."},
+                    {'role': 'system', 'content': f"{instrucao} REGRAS CRÍTICAS: 1. Retorne APENAS o texto processado. 2. Proibido introduções ou conclusões (ex: 'Aqui está sua tradução'). 3. Não omita parágrafos."},
                     {'role': 'user', 'content': conteudo}
                 ])
-                conteudo = response['message']['content'].strip().strip('"')
+                conteudo = response['message']['content'].strip().strip('"').strip("'")
 
             texto_final_acumulado += conteudo + "\n\n"
 
+            # Formatação do PDF
             pdf.set_font(pdf.fonte_pdf, "B", 16)
             pdf.cell(0, 15, f"Parte {i+1}", align="L", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + 170, pdf.get_y())
@@ -127,7 +130,7 @@ def iniciar_processamento():
             f_out.write(texto_final_acumulado)
 
         label_status.configure(text="Status: Concluído!", text_color="#2ECC71")
-        messagebox.showinfo("Sucesso", "PDF e TXT gerados com sucesso!")
+        messagebox.showinfo("Sucesso", "Fidelidade máxima garantida!")
 
     except Exception as e:
         label_status.configure(text="Status: Erro.", text_color="#E74C3C")
@@ -136,47 +139,45 @@ def iniciar_processamento():
 # --- INTERFACE ---
 janela = TkinterDnD.Tk()
 ctk.set_appearance_mode("dark")
-janela.title("PDF Master Pro v4.8 - AI Translator")
+janela.title("PDF Master Pro v5.0 - Professional AI")
 janela.geometry("550x950")
 
-# Força a cor de fundo da janela principal (ROOT)
 bg_color = ctk.ThemeManager.theme["CTk"]["fg_color"]
 janela.configure(bg=bg_color[1]) 
 
 frame_top = ctk.CTkFrame(janela, fg_color="transparent")
 frame_top.pack(pady=10, padx=20, fill="x")
-
 switch_ia = ctk.CTkSwitch(frame_top, text="Ativar IA (Llama 3)", progress_color="#A29BFE")
 switch_ia.pack(side="left")
-
 switch_tema = ctk.CTkSwitch(frame_top, text="Modo Claro", command=alternar_tema)
 switch_tema.pack(side="right")
 
-lbl_titulo = ctk.CTkLabel(janela, text="EDITOR DE LIVROS PDF", font=("Roboto", 24, "bold"))
-lbl_titulo.pack(pady=10)
+ctk.CTkLabel(janela, text="EDITOR DE LIVROS PDF", font=("Roboto", 24, "bold")).pack(pady=10)
 
 frame_drop = ctk.CTkFrame(janela, border_width=2, border_color="#3B8ED0")
 frame_drop.pack(pady=10, padx=40, fill="x")
 frame_drop.drop_target_register(DND_FILES)
 frame_drop.dnd_bind('<<Drop>>', obter_caminho_drop)
-
 ctk.CTkLabel(frame_drop, text="\nARRASTE O .TXT AQUI\n", font=("Roboto", 14, "bold")).pack(pady=20)
 
-entry_caminho = ctk.CTkEntry(janela, width=400, state="readonly", placeholder_text="Aguardando arquivo...")
+entry_caminho = ctk.CTkEntry(janela, width=400, state="readonly", placeholder_text="Arquivo pendente...")
 entry_caminho.pack(pady=5)
 
-# Frame de configurações com cor adaptável
 frame_cfg = ctk.CTkFrame(janela)
 frame_cfg.pack(pady=10, padx=40, fill="both", expand=True)
 
 # Campos de entrada
 ctk.CTkLabel(frame_cfg, text="Nome do Arquivo:", font=("Roboto", 12, "bold")).pack(pady=(10,0))
-entry_nome_arquivo = ctk.CTkEntry(frame_cfg, width=350, placeholder_text="Ex: meu_livro_final")
+entry_nome_arquivo = ctk.CTkEntry(frame_cfg, width=350)
 entry_nome_arquivo.pack()
 
 ctk.CTkLabel(frame_cfg, text="Título Cabeçalho:", font=("Roboto", 12, "bold")).pack(pady=(5,0))
-entry_topo = ctk.CTkEntry(frame_cfg, width=350, placeholder_text="Ex: Transcrição de Aula")
+entry_topo = ctk.CTkEntry(frame_cfg, width=350)
 entry_topo.pack()
+
+ctk.CTkLabel(frame_cfg, text="Texto do Rodapé:", font=("Roboto", 12, "bold")).pack(pady=(5,0))
+entry_rodape = ctk.CTkEntry(frame_cfg, width=350)
+entry_rodape.pack()
 
 ctk.CTkLabel(frame_cfg, text="Fonte:", font=("Roboto", 12, "bold")).pack(pady=(5,0))
 combo_fonte = ctk.CTkComboBox(frame_cfg, values=["helvetica", "Arial", "Times"], width=350)
@@ -190,13 +191,13 @@ combo_ia.pack()
 
 progress_bar = ctk.CTkProgressBar(janela, width=400)
 progress_bar.set(0)
-progress_bar.pack(pady=25)
+progress_bar.pack(pady=20)
 
 btn_gerar = ctk.CTkButton(janela, text="GERAR ARQUIVOS", command=iniciar_processamento, 
                           height=50, font=("Roboto", 16, "bold"), fg_color="#2ECC71", hover_color="#27AE60")
 btn_gerar.pack(pady=10)
 
-label_status = ctk.CTkLabel(janela, text="Pronto para começar", font=("Roboto", 12, "italic"))
-label_status.pack(pady=10)
+label_status = ctk.CTkLabel(janela, text="IA pronta para tradução técnica")
+label_status.pack(pady=5)
 
 janela.mainloop()
