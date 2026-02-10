@@ -179,3 +179,7 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+# Garantir que as bibliotecas do tkdnd sejam salvas no GitHub
+!libtkdnd2.9.4.dll
+!*.tcl
+!*.lib
