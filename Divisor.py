@@ -1,14 +1,25 @@
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 import os
+import time
+import subprocess
+import threading
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 from tkinterdnd2 import DND_FILES, TkinterDnD
 import warnings
 import ollama
-import threading
+
+# Tenta importar psutil para monitorar hardware (instale com: pip install psutil)
+try:
+    import psutil
+except ImportError:
+    psutil = None
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+# Variável global para controlar o monitoramento
+processando = False
 
 class PDF_Customizavel(FPDF):
     def __init__(self, titulo_topo, texto_rodape, fonte_escolhida):
@@ -51,22 +62,62 @@ def obter_caminho_drop(event):
     entry_caminho.insert(0, path)
     entry_caminho.configure(state="readonly")
 
+# --- FUNÇÕES DE MONITORAMENTO ---
+def formatar_tempo(segundos):
+    m, s = divmod(int(segundos), 60)
+    h, m = divmod(m, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+def monitorar_hardware(inicio_tempo):
+    while processando:
+        # Tempo
+        tempo_decorrido = time.time() - inicio_tempo
+        texto_tempo = formatar_tempo(tempo_decorrido)
+        
+        # CPU
+        uso_cpu = f"{psutil.cpu_percent()}%" if psutil else "N/A"
+        
+        # GPU (NVIDIA via linha de comando para não precisar de libs extras complexas)
+        uso_gpu = "0%"
+        try:
+            cmd = "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits"
+            uso_gpu = subprocess.check_output(cmd, shell=True).decode('utf-8').strip() + "%"
+        except:
+            uso_gpu = "N/A"
+
+        # Atualiza Interface
+        janela.after(0, lambda t=texto_tempo, c=uso_cpu, g=uso_gpu: atualizar_labels_info(t, c, g))
+        time.sleep(1)
+
+def atualizar_labels_info(tempo, cpu, gpu):
+    lbl_tempo_val.configure(text=tempo)
+    lbl_cpu_val.configure(text=cpu)
+    lbl_gpu_val.configure(text=gpu)
+
+# --- LÓGICA PRINCIPAL ---
 def tarefa_pesada(caminho_txt, nome_base, modo_ia, pasta_destino, dados_pdf):
+    global processando
+    processando = True
+    inicio = time.time()
+    
+    # Inicia thread de monitoramento em paralelo
+    thread_mon = threading.Thread(target=monitorar_hardware, args=(inicio,))
+    thread_mon.daemon = True
+    thread_mon.start()
+
     try:
         with open(caminho_txt, "r", encoding="utf-8") as f:
             texto_bruto = f.read()
 
-        # CORREÇÃO: Voltamos para um tamanho seguro. 
-        # Se a GPU entrar, voa. Se for CPU, não trava.
         TAMANHO_MAXIMO = 2500 
-        inicio, partes = 0, []
-        while inicio < len(texto_bruto):
-            fim = min(inicio + TAMANHO_MAXIMO, len(texto_bruto))
+        idx_txt, partes = 0, []
+        while idx_txt < len(texto_bruto):
+            fim = min(idx_txt + TAMANHO_MAXIMO, len(texto_bruto))
             if fim < len(texto_bruto):
-                ponto = texto_bruto.rfind('.', inicio, fim)
-                fim = ponto + 1 if ponto != -1 and ponto > inicio else fim
-            partes.append(texto_bruto[inicio:fim].strip())
-            inicio = fim
+                ponto = texto_bruto.rfind('.', idx_txt, fim)
+                fim = ponto + 1 if ponto != -1 and ponto > idx_txt else fim
+            partes.append(texto_bruto[idx_txt:fim].strip())
+            idx_txt = fim
 
         pdf = PDF_Customizavel(dados_pdf['topo'], dados_pdf['rodape'], dados_pdf['fonte'])
         pdf.set_left_margin(20)
@@ -78,7 +129,7 @@ def tarefa_pesada(caminho_txt, nome_base, modo_ia, pasta_destino, dados_pdf):
 
         for i, conteudo in enumerate(partes):
             if switch_ia.get() == 1:
-                janela.after(0, lambda: label_status.configure(text=f"Processando parte {i+1} de {total}...", text_color="#A29BFE"))
+                janela.after(0, lambda: label_status.configure(text=f"Processando parte {i+1}/{total}", text_color="#A29BFE"))
                 
                 if modo_ia == "Apenas Corrigir":
                     instrucao = "Revisor: Corrija pontuação e gramática. Apenas o texto."
@@ -87,15 +138,14 @@ def tarefa_pesada(caminho_txt, nome_base, modo_ia, pasta_destino, dados_pdf):
                 else:
                     instrucao = "Translator: PT to EN. Formal and accurate. Text only."
 
-                # OTIMIZAÇÃO: Removemos 'num_gpu' forçado para deixar o Ollama decidir
                 response = ollama.chat(
                     model='llama3', 
                     messages=[
-                        {'role': 'system', 'content': f"{instrucao} Não comente nada. Saída pura."},
+                        {'role': 'system', 'content': f"{instrucao} Sem introduções. Saída pura."},
                         {'role': 'user', 'content': conteudo}
                     ],
                     options={
-                        "temperature": 0.2, # Mantemos baixa temperatura para velocidade
+                        "temperature": 0.2, 
                     }
                 )
                 conteudo = response['message']['content'].strip().strip('"').strip("'")
@@ -116,11 +166,15 @@ def tarefa_pesada(caminho_txt, nome_base, modo_ia, pasta_destino, dados_pdf):
         with open(os.path.join(pasta_destino, f"{nome_base}_REVISADO.txt"), "w", encoding="utf-8") as f_out:
             f_out.write(texto_final_acumulado)
 
+        processando = False # Para o monitoramento
         janela.after(0, lambda: label_status.configure(text="Concluído!", text_color="#2ECC71"))
         janela.after(0, lambda: btn_gerar.configure(state="normal"))
-        messagebox.showinfo("Sucesso", "Processamento finalizado!")
+        
+        tempo_total = formatar_tempo(time.time() - inicio)
+        messagebox.showinfo("Sucesso", f"Finalizado em {tempo_total}!")
 
     except Exception as e:
+        processando = False
         janela.after(0, lambda: label_status.configure(text="Erro crítico.", text_color="#E74C3C"))
         janela.after(0, lambda: btn_gerar.configure(state="normal"))
         messagebox.showerror("Erro", str(e))
@@ -128,6 +182,7 @@ def tarefa_pesada(caminho_txt, nome_base, modo_ia, pasta_destino, dados_pdf):
 def iniciar_processamento():
     caminho_txt = entry_caminho.get()
     nome_base = entry_nome_arquivo.get().strip()
+    
     if not caminho_txt or not os.path.exists(caminho_txt):
         messagebox.showwarning("Erro", "Arraste um arquivo .txt!")
         return
@@ -138,7 +193,7 @@ def iniciar_processamento():
     if not pasta_destino: return
 
     btn_gerar.configure(state="disabled")
-    label_status.configure(text="Iniciando...", text_color="#3B8ED0")
+    label_status.configure(text="Iniciando motores...", text_color="#3B8ED0")
     
     dados_pdf = {'topo': entry_topo.get(), 'rodape': entry_rodape.get(), 'fonte': combo_fonte.get()}
 
@@ -149,7 +204,7 @@ def iniciar_processamento():
 # --- INTERFACE ---
 janela = TkinterDnD.Tk()
 ctk.set_appearance_mode("dark")
-janela.title("PDF Master Pro v5.3 - Stable")
+janela.title("PDF Master Pro v6.0 - Dashboard")
 janela.geometry("550x950")
 
 bg_color = ctk.ThemeManager.theme["CTk"]["fg_color"]
@@ -162,7 +217,31 @@ switch_ia.pack(side="left")
 switch_tema = ctk.CTkSwitch(frame_top, text="Modo Claro", command=alternar_tema)
 switch_tema.pack(side="right")
 
-ctk.CTkLabel(janela, text="EDITOR DE LIVROS PDF", font=("Roboto", 24, "bold")).pack(pady=10)
+ctk.CTkLabel(janela, text="EDITOR DE LIVROS PDF", font=("Roboto", 24, "bold")).pack(pady=5)
+
+# --- PAINEL DE MONITORAMENTO ---
+frame_monitor = ctk.CTkFrame(janela, fg_color="#2B2B2B", corner_radius=10)
+frame_monitor.pack(pady=5, padx=40, fill="x")
+
+# Colunas do monitor
+col1 = ctk.CTkFrame(frame_monitor, fg_color="transparent")
+col1.pack(side="left", expand=True, padx=10, pady=5)
+ctk.CTkLabel(col1, text="Tempo", font=("Roboto", 10)).pack()
+lbl_tempo_val = ctk.CTkLabel(col1, text="00:00:00", font=("Roboto", 16, "bold"), text_color="#E74C3C")
+lbl_tempo_val.pack()
+
+col2 = ctk.CTkFrame(frame_monitor, fg_color="transparent")
+col2.pack(side="left", expand=True, padx=10, pady=5)
+ctk.CTkLabel(col2, text="CPU", font=("Roboto", 10)).pack()
+lbl_cpu_val = ctk.CTkLabel(col2, text="0%", font=("Roboto", 16, "bold"), text_color="#3B8ED0")
+lbl_cpu_val.pack()
+
+col3 = ctk.CTkFrame(frame_monitor, fg_color="transparent")
+col3.pack(side="left", expand=True, padx=10, pady=5)
+ctk.CTkLabel(col3, text="GPU (RTX)", font=("Roboto", 10)).pack()
+lbl_gpu_val = ctk.CTkLabel(col3, text="0%", font=("Roboto", 16, "bold"), text_color="#2ECC71")
+lbl_gpu_val.pack()
+# -----------------------------
 
 frame_drop = ctk.CTkFrame(janela, border_width=2, border_color="#3B8ED0")
 frame_drop.pack(pady=10, padx=40, fill="x")
@@ -205,7 +284,10 @@ progress_bar.pack(pady=20)
 btn_gerar = ctk.CTkButton(janela, text="GERAR ARQUIVOS", command=iniciar_processamento, height=50, fg_color="#2ECC71", font=("Roboto", 16, "bold"))
 btn_gerar.pack(pady=10)
 
-label_status = ctk.CTkLabel(janela, text="Pronto.")
+label_status = ctk.CTkLabel(janela, text="Sistema pronto.")
 label_status.pack(pady=5)
+
+if not psutil:
+    messagebox.showwarning("Aviso", "Instale o psutil (pip install psutil) para ver o uso da CPU!")
 
 janela.mainloop()
