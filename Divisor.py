@@ -6,6 +6,7 @@ from fpdf.enums import XPos, YPos
 from tkinterdnd2 import DND_FILES, TkinterDnD
 import warnings
 import ollama
+import threading # Biblioteca para não travar a janela
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -50,29 +51,12 @@ def obter_caminho_drop(event):
     entry_caminho.insert(0, path)
     entry_caminho.configure(state="readonly")
 
-def iniciar_processamento():
-    caminho_txt = entry_caminho.get()
-    nome_base = entry_nome_arquivo.get().strip()
-    modo_ia = combo_ia.get()
-    
-    if not caminho_txt or not os.path.exists(caminho_txt):
-        messagebox.showwarning("Erro", "Arraste um arquivo .txt!")
-        return
-    if not nome_base:
-        messagebox.showwarning("Erro", "Dê um nome ao arquivo!")
-        return
-
-    pasta_destino = filedialog.askdirectory(title="Onde salvar os arquivos?")
-    if not pasta_destino: return
-
+# NOVA FUNÇÃO: O trabalho pesado agora vive aqui
+def tarefa_pesada(caminho_txt, nome_base, modo_ia, pasta_destino, dados_pdf):
     try:
-        label_status.configure(text="Status: Processando...", text_color="#3B8ED0")
-        janela.update()
-
         with open(caminho_txt, "r", encoding="utf-8") as f:
             texto_bruto = f.read()
 
-        # Ajuste de tamanho para não cortar frases no meio
         TAMANHO_MAXIMO = 4500 
         inicio, partes = 0, []
         while inicio < len(texto_bruto):
@@ -83,7 +67,7 @@ def iniciar_processamento():
             partes.append(texto_bruto[inicio:fim].strip())
             inicio = fim
 
-        pdf = PDF_Customizavel(entry_topo.get(), entry_rodape.get(), combo_fonte.get())
+        pdf = PDF_Customizavel(dados_pdf['topo'], dados_pdf['rodape'], dados_pdf['fonte'])
         pdf.set_left_margin(20)
         pdf.set_right_margin(20)
         pdf.add_page()
@@ -93,26 +77,24 @@ def iniciar_processamento():
 
         for i, conteudo in enumerate(partes):
             if switch_ia.get() == 1:
-                label_status.configure(text=f"IA: {modo_ia} ({i+1}/{total})", text_color="#A29BFE")
-                janela.update()
+                # Atualiza o status de forma segura
+                janela.after(0, lambda: label_status.configure(text=f"IA: {modo_ia} ({i+1}/{total})", text_color="#A29BFE"))
                 
-                # --- NOVO PROMPT REFINADO v5.0 ---
                 if modo_ia == "Apenas Corrigir":
-                    instrucao = "Atue como revisor gramatical experiente. Corrija pontuação e ortografia. Mantenha 100% do significado original."
+                    instrucao = "Atue como revisor gramatical. Corrija pontuação. Mantenha o significado."
                 elif modo_ia == "Inglês -> Português":
-                    instrucao = "Atue como tradutor profissional. Traduza do Inglês para Português do Brasil de forma fluida e natural. Não resuma."
-                elif modo_ia == "Português -> Inglês":
-                    instrucao = "Act as a professional translator. Translate from Portuguese to English. Keep the tone formal and accurate. Do not summarize."
+                    instrucao = "Traduza do Inglês para Português do Brasil de forma fluida."
+                else:
+                    instrucao = "Translate from Portuguese to English. Accurate and formal."
 
                 response = ollama.chat(model='llama3', messages=[
-                    {'role': 'system', 'content': f"{instrucao} REGRAS CRÍTICAS: 1. Retorne APENAS o texto processado. 2. Proibido introduções ou conclusões (ex: 'Aqui está sua tradução'). 3. Não omita parágrafos."},
+                    {'role': 'system', 'content': f"{instrucao} Retorne apenas o texto final. Sem comentários."},
                     {'role': 'user', 'content': conteudo}
                 ])
                 conteudo = response['message']['content'].strip().strip('"').strip("'")
 
             texto_final_acumulado += conteudo + "\n\n"
 
-            # Formatação do PDF
             pdf.set_font(pdf.fonte_pdf, "B", 16)
             pdf.cell(0, 15, f"Parte {i+1}", align="L", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + 170, pdf.get_y())
@@ -121,25 +103,55 @@ def iniciar_processamento():
             pdf.multi_cell(0, 7, text=limpar_texto_para_pdf(conteudo), align="J")
             pdf.ln(10)
             
-            progress_bar.set((i + 1) / total)
-            janela.update()
+            # Atualiza barra de progresso
+            janela.after(0, lambda v=(i + 1) / total: progress_bar.set(v))
 
         pdf.output(os.path.join(pasta_destino, f"{nome_base}.pdf"))
-        
         with open(os.path.join(pasta_destino, f"{nome_base}_REVISADO.txt"), "w", encoding="utf-8") as f_out:
             f_out.write(texto_final_acumulado)
 
-        label_status.configure(text="Status: Concluído!", text_color="#2ECC71")
-        messagebox.showinfo("Sucesso", "Fidelidade máxima garantida!")
+        janela.after(0, lambda: label_status.configure(text="Status: Concluído!", text_color="#2ECC71"))
+        janela.after(0, lambda: btn_gerar.configure(state="normal"))
+        messagebox.showinfo("Sucesso", "Arquivos gerados sem travar a janela!")
 
     except Exception as e:
-        label_status.configure(text="Status: Erro.", text_color="#E74C3C")
+        janela.after(0, lambda: label_status.configure(text="Status: Erro.", text_color="#E74C3C"))
+        janela.after(0, lambda: btn_gerar.configure(state="normal"))
         messagebox.showerror("Erro", str(e))
 
-# --- INTERFACE ---
+def iniciar_processamento():
+    caminho_txt = entry_caminho.get()
+    nome_base = entry_nome_arquivo.get().strip()
+    
+    if not caminho_txt or not os.path.exists(caminho_txt):
+        messagebox.showwarning("Erro", "Arraste um arquivo .txt!")
+        return
+    if not nome_base:
+        messagebox.showwarning("Erro", "Dê um nome ao arquivo!")
+        return
+
+    pasta_destino = filedialog.askdirectory(title="Onde salvar?")
+    if not pasta_destino: return
+
+    # Desativa o botão para evitar cliques duplos
+    btn_gerar.configure(state="disabled")
+    label_status.configure(text="Status: Iniciando Thread...", text_color="#3B8ED0")
+    
+    dados_pdf = {
+        'topo': entry_topo.get(),
+        'rodape': entry_rodape.get(),
+        'fonte': combo_fonte.get()
+    }
+
+    # LANÇA O TRABALHO EM UMA THREAD SEPARADA
+    thread = threading.Thread(target=tarefa_pesada, args=(caminho_txt, nome_base, combo_ia.get(), pasta_destino, dados_pdf))
+    thread.daemon = True # Mata a thread se a janela fechar
+    thread.start()
+
+# --- INTERFACE (Igual, apenas o botão chama a thread) ---
 janela = TkinterDnD.Tk()
 ctk.set_appearance_mode("dark")
-janela.title("PDF Master Pro v5.0 - Professional AI")
+janela.title("PDF Master Pro v5.1 - Turbo Mode")
 janela.geometry("550x950")
 
 bg_color = ctk.ThemeManager.theme["CTk"]["fg_color"]
@@ -160,26 +172,25 @@ frame_drop.drop_target_register(DND_FILES)
 frame_drop.dnd_bind('<<Drop>>', obter_caminho_drop)
 ctk.CTkLabel(frame_drop, text="\nARRASTE O .TXT AQUI\n", font=("Roboto", 14, "bold")).pack(pady=20)
 
-entry_caminho = ctk.CTkEntry(janela, width=400, state="readonly", placeholder_text="Arquivo pendente...")
+entry_caminho = ctk.CTkEntry(janela, width=400, state="readonly")
 entry_caminho.pack(pady=5)
 
 frame_cfg = ctk.CTkFrame(janela)
 frame_cfg.pack(pady=10, padx=40, fill="both", expand=True)
 
-# Campos de entrada
-ctk.CTkLabel(frame_cfg, text="Nome do Arquivo:", font=("Roboto", 12, "bold")).pack(pady=(10,0))
+ctk.CTkLabel(frame_cfg, text="Nome do Arquivo:").pack(pady=(10,0))
 entry_nome_arquivo = ctk.CTkEntry(frame_cfg, width=350)
 entry_nome_arquivo.pack()
 
-ctk.CTkLabel(frame_cfg, text="Título Cabeçalho:", font=("Roboto", 12, "bold")).pack(pady=(5,0))
+ctk.CTkLabel(frame_cfg, text="Título Cabeçalho:").pack(pady=(5,0))
 entry_topo = ctk.CTkEntry(frame_cfg, width=350)
 entry_topo.pack()
 
-ctk.CTkLabel(frame_cfg, text="Texto do Rodapé:", font=("Roboto", 12, "bold")).pack(pady=(5,0))
+ctk.CTkLabel(frame_cfg, text="Texto do Rodapé:").pack(pady=(5,0))
 entry_rodape = ctk.CTkEntry(frame_cfg, width=350)
 entry_rodape.pack()
 
-ctk.CTkLabel(frame_cfg, text="Fonte:", font=("Roboto", 12, "bold")).pack(pady=(5,0))
+ctk.CTkLabel(frame_cfg, text="Fonte:").pack(pady=(5,0))
 combo_fonte = ctk.CTkComboBox(frame_cfg, values=["helvetica", "Arial", "Times"], width=350)
 combo_fonte.set("helvetica")
 combo_fonte.pack()
@@ -193,11 +204,10 @@ progress_bar = ctk.CTkProgressBar(janela, width=400)
 progress_bar.set(0)
 progress_bar.pack(pady=20)
 
-btn_gerar = ctk.CTkButton(janela, text="GERAR ARQUIVOS", command=iniciar_processamento, 
-                          height=50, font=("Roboto", 16, "bold"), fg_color="#2ECC71", hover_color="#27AE60")
+btn_gerar = ctk.CTkButton(janela, text="GERAR ARQUIVOS", command=iniciar_processamento, height=50, fg_color="#2ECC71")
 btn_gerar.pack(pady=10)
 
-label_status = ctk.CTkLabel(janela, text="IA pronta para tradução técnica")
+label_status = ctk.CTkLabel(janela, text="Interface Responsiva Ativada")
 label_status.pack(pady=5)
 
 janela.mainloop()
