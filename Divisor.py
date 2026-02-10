@@ -56,8 +56,9 @@ def tarefa_pesada(caminho_txt, nome_base, modo_ia, pasta_destino, dados_pdf):
         with open(caminho_txt, "r", encoding="utf-8") as f:
             texto_bruto = f.read()
 
-        # OTIMIZAÇÃO GPU: Blocos maiores para aproveitar o poder da placa de vídeo
-        TAMANHO_MAXIMO = 7000 
+        # CORREÇÃO: Voltamos para um tamanho seguro. 
+        # Se a GPU entrar, voa. Se for CPU, não trava.
+        TAMANHO_MAXIMO = 2500 
         inicio, partes = 0, []
         while inicio < len(texto_bruto):
             fim = min(inicio + TAMANHO_MAXIMO, len(texto_bruto))
@@ -77,9 +78,8 @@ def tarefa_pesada(caminho_txt, nome_base, modo_ia, pasta_destino, dados_pdf):
 
         for i, conteudo in enumerate(partes):
             if switch_ia.get() == 1:
-                janela.after(0, lambda: label_status.configure(text=f"Processando na GPU: {i+1}/{total}", text_color="#A29BFE"))
+                janela.after(0, lambda: label_status.configure(text=f"Processando parte {i+1} de {total}...", text_color="#A29BFE"))
                 
-                # Prompts ultra-curtos para resposta instantânea
                 if modo_ia == "Apenas Corrigir":
                     instrucao = "Revisor: Corrija pontuação e gramática. Apenas o texto."
                 elif modo_ia == "Inglês -> Português":
@@ -87,17 +87,15 @@ def tarefa_pesada(caminho_txt, nome_base, modo_ia, pasta_destino, dados_pdf):
                 else:
                     instrucao = "Translator: PT to EN. Formal and accurate. Text only."
 
-                # CHAMADA OTIMIZADA PARA GPU
+                # OTIMIZAÇÃO: Removemos 'num_gpu' forçado para deixar o Ollama decidir
                 response = ollama.chat(
                     model='llama3', 
                     messages=[
-                        {'role': 'system', 'content': f"{instrucao} Não comente nada, não introduza. Saída pura."},
+                        {'role': 'system', 'content': f"{instrucao} Não comente nada. Saída pura."},
                         {'role': 'user', 'content': conteudo}
                     ],
                     options={
-                        "num_gpu": 1,         # Tenta forçar o uso da GPU
-                        "temperature": 0.2,    # Mais rápido e menos criativo (fiel ao original)
-                        "num_thread": 12       # Auxílio da CPU em paralelo
+                        "temperature": 0.2, # Mantemos baixa temperatura para velocidade
                     }
                 )
                 conteudo = response['message']['content'].strip().strip('"').strip("'")
@@ -118,12 +116,12 @@ def tarefa_pesada(caminho_txt, nome_base, modo_ia, pasta_destino, dados_pdf):
         with open(os.path.join(pasta_destino, f"{nome_base}_REVISADO.txt"), "w", encoding="utf-8") as f_out:
             f_out.write(texto_final_acumulado)
 
-        janela.after(0, lambda: label_status.configure(text="Status: Concluído (GPU Mode)!", text_color="#2ECC71"))
+        janela.after(0, lambda: label_status.configure(text="Concluído!", text_color="#2ECC71"))
         janela.after(0, lambda: btn_gerar.configure(state="normal"))
-        messagebox.showinfo("Sucesso", "Tradução via GPU concluída com sucesso!")
+        messagebox.showinfo("Sucesso", "Processamento finalizado!")
 
     except Exception as e:
-        janela.after(0, lambda: label_status.configure(text="Status: Erro.", text_color="#E74C3C"))
+        janela.after(0, lambda: label_status.configure(text="Erro crítico.", text_color="#E74C3C"))
         janela.after(0, lambda: btn_gerar.configure(state="normal"))
         messagebox.showerror("Erro", str(e))
 
@@ -140,7 +138,7 @@ def iniciar_processamento():
     if not pasta_destino: return
 
     btn_gerar.configure(state="disabled")
-    label_status.configure(text="Status: Ativando Motores...", text_color="#3B8ED0")
+    label_status.configure(text="Iniciando...", text_color="#3B8ED0")
     
     dados_pdf = {'topo': entry_topo.get(), 'rodape': entry_rodape.get(), 'fonte': combo_fonte.get()}
 
@@ -151,7 +149,7 @@ def iniciar_processamento():
 # --- INTERFACE ---
 janela = TkinterDnD.Tk()
 ctk.set_appearance_mode("dark")
-janela.title("PDF Master Pro v5.2 - GPU Turbo")
+janela.title("PDF Master Pro v5.3 - Stable")
 janela.geometry("550x950")
 
 bg_color = ctk.ThemeManager.theme["CTk"]["fg_color"]
@@ -207,7 +205,7 @@ progress_bar.pack(pady=20)
 btn_gerar = ctk.CTkButton(janela, text="GERAR ARQUIVOS", command=iniciar_processamento, height=50, fg_color="#2ECC71", font=("Roboto", 16, "bold"))
 btn_gerar.pack(pady=10)
 
-label_status = ctk.CTkLabel(janela, text="Pronto para processamento de alto desempenho")
+label_status = ctk.CTkLabel(janela, text="Pronto.")
 label_status.pack(pady=5)
 
 janela.mainloop()
